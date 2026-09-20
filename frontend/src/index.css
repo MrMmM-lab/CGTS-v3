@@ -1,0 +1,107 @@
+@import "tailwindcss";
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@300;400;500;600;700;800&family=Sarabun:wght@300;400;500;600;700&display=swap');
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --color-cassava-light: #e8f5e9;
+  --color-cassava: #2e7d32;
+  --color-cassava-dark: #1b5e20;
+  --color-cassava-accent: #ffd700;
+}
+
+body {
+  font-family: 'Outfit', 'Sarabun', 'Inter', sans-serif;
+  margin: 0;
+  padding: 0;
+  background-color: #0c1220; /* Sleek dark-mode background */
+  color: #f3f4f6;
+  min-height: 100vh;
+}
+
+/* Custom Glassmorphism Utility */
+.glass-panel {
+  background: rgba(15, 23, 42, 0.45);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  transition: all 0.3s ease;
+}
+
+.light .glass-panel {
+  background: rgba(255, 255, 255, 0.45);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid rgba(255, 255, 255, 0.65);
+  box-shadow: 
+    0 10px 40px -10px rgba(0, 0, 0, 0.02), 
+    0 30px 60px -15px rgba(16, 185, 129, 0.08), 
+    inset 0 1px 1px rgba(255, 255, 255, 0.8);
+}
+
+.glass-card {
+  background: rgba(255, 255, 255, 0.03);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  transition: all 0.3s ease;
+}
+
+.light .glass-card {
+  background: rgba(255, 255, 255, 0.35);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  box-shadow: 
+    0 10px 30px -5px rgba(0, 0, 0, 0.02),
+    inset 0 1px 0 rgba(255, 255, 255, 0.6);
+}
+
+/* Custom Input Field Theme Support */
+.custom-input {
+  background: rgba(2, 6, 23, 0.5);
+  border: 1px solid rgba(30, 41, 59, 1);
+  color: #ffffff;
+  transition: all 0.3s ease;
+}
+
+.custom-input::placeholder {
+  color: #64748b;
+}
+
+.light .custom-input {
+  background: rgba(255, 255, 255, 0.7);
+  border: 1px solid rgba(16, 185, 129, 0.15);
+  color: #0f172a;
+}
+
+.light .custom-input::placeholder {
+  color: #94a3b8;
+}
+
+/* Add custom input focus states */
+.custom-input:focus {
+  border-color: #10b981;
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.25);
+}
+
+.light .custom-input:focus {
+  background: #ffffff;
+  border-color: #10b981;
+  box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.12);
+}
+
+/* Micro-animations and custom styling */
+@keyframes pulse-slow {
+  0%, 100% {
+    opacity: 0.4;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.8;
+    transform: scale(1.05);
+  }
+}
+
+.animate-pulse-slow {
+  animation: pulse-slow 8s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
