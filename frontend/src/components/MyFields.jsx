@@ -19,7 +19,7 @@ import {
   Sparkles,
   Map
 } from 'lucide-react';
-import { MapContainer, TileLayer, Polygon, Marker, useMapEvents } from 'react-leaflet';
+import { MapContainer, TileLayer, Polygon, Marker, Popup, useMapEvents, LayersControl, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import { calculatePolygonArea, calculateCentroid, parseDmsToDecimal, getNdviColorInfo, formatThaiDate, formatDateDMY } from '../utils/geoUtils';
 
@@ -42,10 +42,25 @@ const DrawPolygonHandler = ({ points, setPoints }) => {
   return null;
 };
 
+// Map flyTo helper component when searching coordinates
+const MapFlyToSearch = ({ center }) => {
+  const map = useMap();
+  useEffect(() => {
+    if (center && center[0] && center[1]) {
+      map.flyTo(center, 17, { duration: 1.5 });
+    }
+  }, [center, map]);
+  return null;
+};
+
 const MyFields = () => {
   const { user, token, fields, fetchFields, navigateTo, API_URL } = useAuth();
   const [searchTerm, setSearchTerm] = useState('');
   const [cropFilter, setCropFilter] = useState('all'); // 'all', 'sugarcane', 'cassava'
+  
+  // Coordinate Search & Map Focus state
+  const [searchedLocation, setSearchedLocation] = useState(null);
+  const [searchCenter, setSearchCenter] = useState(null);
   
   // Modal states
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -74,6 +89,8 @@ const MyFields = () => {
     setFormError('');
     setEditingFieldId(null);
     setFormTab('info');
+    setSearchedLocation(null);
+    setSearchCenter(null);
   };
 
   const openAddModal = () => {
@@ -97,13 +114,27 @@ const MyFields = () => {
     setIsModalOpen(true);
   };
 
-  const handleApplyDms = () => {
+  const handleSearchCoordinate = () => {
+    const parsed = parseDmsToDecimal(dmsInput);
+    if (parsed) {
+      const coords = [parsed.lat, parsed.lng];
+      setSearchedLocation(parsed);
+      setSearchCenter(coords);
+      setFormError('');
+    } else {
+      setFormError('รูปแบบพิกัดไม่ถูกต้อง รองรับทั้ง Decimal (เช่น 16.459030, 103.585911) และ DMS (เช่น 16°26\'42.4"N 103°31\'57.7"E)');
+    }
+  };
+
+  const handleAddCoordinate = () => {
     const parsed = parseDmsToDecimal(dmsInput);
     if (parsed) {
       setPolygonPoints(prev => [...prev, [parsed.lat, parsed.lng]]);
+      setSearchCenter([parsed.lat, parsed.lng]);
       setDmsInput('');
+      setFormError('');
     } else {
-      setFormError('รูปแบบพิกัด DMS ไม่ถูกต้อง ตัวอย่าง: 16°26\'42.4"N 103°31\'57.7"E');
+      setFormError('รูปแบบพิกัดไม่ถูกต้อง รองรับทั้ง Decimal (เช่น 16.459030, 103.585911) และ DMS (เช่น 16°26\'42.4"N 103°31\'57.7"E)');
     }
   };
 
@@ -292,8 +323,8 @@ const MyFields = () => {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {filteredFields.map((field) => {
-            const latestNdvi = field.latest_ndvi?.ndvi_mean || 0.60;
-            const ndviInfo = getNdviColorInfo(latestNdvi);
+            const latestNdvi = field.latest_ndvi?.ndvi_mean ?? null;
+            const ndviInfo = latestNdvi !== null ? getNdviColorInfo(latestNdvi) : null;
             const isSugarcane = field.crop_type.toLowerCase() === 'sugarcane';
 
             return (
@@ -353,13 +384,13 @@ const MyFields = () => {
                     <div className="p-3 rounded-2xl bg-slate-100/60 dark:bg-slate-900/60 border border-slate-200/50 dark:border-slate-800/50">
                       <span className="text-[10px] font-bold text-slate-500 dark:text-gray-400 uppercase block">NDVI ล่าสุด</span>
                       <div className="flex items-center gap-1.5 mt-0.5">
-                        <div className={`w-2.5 h-2.5 rounded-full ${ndviInfo.bg}`} />
+                        {ndviInfo && <div className={`w-2.5 h-2.5 rounded-full ${ndviInfo.bg}`} />}
                         <span className="text-lg font-black text-slate-800 dark:text-white">
-                          {latestNdvi.toFixed(2)}
+                          {latestNdvi !== null ? latestNdvi.toFixed(2) : '-'}
                         </span>
                       </div>
                       <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold truncate block">
-                        ความเขียวพืชสมบูรณ์
+                        {ndviInfo ? ndviInfo.label.split('(')[0] : 'ยังไม่มีข้อมูล'}
                       </span>
                     </div>
                   </div>
@@ -602,25 +633,60 @@ const MyFields = () => {
                     </div>
                   </div>
 
-                  {/* DMS Quick Input */}
-                  <div className="p-3 rounded-2xl bg-slate-100/60 dark:bg-slate-900/60 border border-slate-200/50 dark:border-slate-800/50 flex flex-col sm:flex-row items-center gap-2">
-                    <span className="text-xs font-bold text-slate-700 dark:text-gray-300 shrink-0">
-                      แปลงพิกัด DMS:
-                    </span>
-                    <input
-                      type="text"
-                      placeholder='เช่น 16°26&apos;42.4"N 103°31&apos;57.7"E'
-                      value={dmsInput}
-                      onChange={(e) => setDmsInput(e.target.value)}
-                      className="w-full custom-input px-3 py-1.5 rounded-xl text-xs"
-                    />
-                    <button
-                      type="button"
-                      onClick={handleApplyDms}
-                      className="w-full sm:w-auto px-3 py-1.5 rounded-xl bg-emerald-500 text-slate-950 font-bold text-xs shrink-0 cursor-pointer"
-                    >
-                      + เพิ่มพิกัด
-                    </button>
+                  {/* Coordinate Quick Input & Search (DMS / Decimal) */}
+                  <div className="p-3 rounded-2xl bg-slate-100/60 dark:bg-slate-900/60 border border-slate-200/50 dark:border-slate-800/50 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-slate-700 dark:text-gray-300">
+                        📍 ค้นหาและระบุพิกัดแปลง (Decimal / DMS):
+                      </span>
+                      {searchedLocation && (
+                        <span className="text-[11px] text-emerald-600 dark:text-emerald-400 font-medium flex items-center gap-1">
+                          <span>หมุดที่ค้นหา: {searchedLocation.lat.toFixed(6)}, {searchedLocation.lng.toFixed(6)}</span>
+                          <button
+                            type="button"
+                            onClick={() => setSearchedLocation(null)}
+                            className="text-slate-400 hover:text-red-500 ml-1 cursor-pointer"
+                          >
+                            <X className="w-3.5 h-3.5 inline" />
+                          </button>
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex flex-col sm:flex-row items-center gap-2">
+                      <input
+                        type="text"
+                        placeholder='เช่น 16.459030, 103.585911 หรือ 16°26&apos;42.4"N 103°31&apos;57.7"E'
+                        value={dmsInput}
+                        onChange={(e) => setDmsInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            handleSearchCoordinate();
+                          }
+                        }}
+                        className="w-full custom-input px-3 py-2 rounded-xl text-xs"
+                      />
+                      <div className="flex items-center gap-2 w-full sm:w-auto shrink-0">
+                        <button
+                          type="button"
+                          onClick={handleSearchCoordinate}
+                          className="flex-1 sm:flex-none px-3.5 py-2 rounded-xl bg-slate-200 dark:bg-slate-800 text-slate-800 dark:text-slate-200 hover:bg-slate-300 dark:hover:bg-slate-700 font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
+                          title="ค้นหาและเลื่อนแผนที่ไปยังพิกัด"
+                        >
+                          <Search className="w-3.5 h-3.5 text-emerald-500" />
+                          <span>ค้นหาบนแผนที่</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleAddCoordinate}
+                          className="flex-1 sm:flex-none px-3.5 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-colors shadow-sm"
+                          title="เพิ่มพิกัดนี้เป็นจุดมุมแปลง"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                          <span>เพิ่มเป็นจุดมุมแปลง</span>
+                        </button>
+                      </div>
+                    </div>
                   </div>
 
                   {/* Leaflet Map Box */}
@@ -630,12 +696,31 @@ const MyFields = () => {
                       zoom={14}
                       style={{ width: '100%', height: '100%' }}
                     >
-                      {/* Google Hybrid Satellite Tile Layer */}
-                      <TileLayer
-                        attribution="&copy; Google Satellite Imagery"
-                        url="https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}"
-                        maxZoom={20}
-                      />
+                      <MapFlyToSearch center={searchCenter} />
+
+                      <LayersControl position="topright">
+                        <LayersControl.BaseLayer checked name="🌍 Esri World Imagery (ดาวเทียมจริง)">
+                          <TileLayer
+                            attribution="&copy; Esri World Imagery &mdash; Source: Esri, Maxar, Earthstar Geographics"
+                            url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+                            maxZoom={19}
+                          />
+                        </LayersControl.BaseLayer>
+                        <LayersControl.BaseLayer name="🛰️ Sentinel-2 Cloudless (Copernicus/EOX)">
+                          <TileLayer
+                            attribution="&copy; Sentinel-2 cloudless by EOX"
+                            url="https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2021_3857/default/GoogleMapsCompatible/{z}/{y}/{x}.jpg"
+                            maxZoom={18}
+                          />
+                        </LayersControl.BaseLayer>
+                        <LayersControl.BaseLayer name="🗺️ Google Satellite (มีชื่อถนน)">
+                          <TileLayer
+                            attribution="&copy; Google Satellite Imagery"
+                            url="https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}"
+                            maxZoom={20}
+                          />
+                        </LayersControl.BaseLayer>
+                      </LayersControl>
                       
                       <DrawPolygonHandler points={polygonPoints} setPoints={setPolygonPoints} />
 
@@ -654,6 +739,26 @@ const MyFields = () => {
                       {polygonPoints.map((pt, idx) => (
                         <Marker key={idx} position={pt} />
                       ))}
+
+                      {searchedLocation && (
+                        <Marker position={[searchedLocation.lat, searchedLocation.lng]}>
+                          <Popup>
+                            <div className="p-1 text-center">
+                              <span className="text-xs font-bold block text-slate-800">📍 พิกัดที่ค้นหา</span>
+                              <span className="text-[11px] text-slate-600 block font-mono my-1">{searchedLocation.lat.toFixed(6)}, {searchedLocation.lng.toFixed(6)}</span>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setPolygonPoints(prev => [...prev, [searchedLocation.lat, searchedLocation.lng]]);
+                                }}
+                                className="px-2.5 py-1 bg-emerald-500 text-slate-950 text-[10px] font-bold rounded-lg cursor-pointer hover:bg-emerald-400"
+                              >
+                                + เพิ่มเป็นจุดมุมแปลง
+                              </button>
+                            </div>
+                          </Popup>
+                        </Marker>
+                      )}
                     </MapContainer>
                   </div>
 

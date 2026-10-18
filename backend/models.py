@@ -47,9 +47,14 @@ class NDVIRecord(Base):
     ndvi_mean = Column(Float, nullable=False)
     ndvi_min = Column(Float, nullable=False)
     ndvi_max = Column(Float, nullable=False)
-    source = Column(String, default="MOCK")  # 'GEE' or 'MOCK'
+    source = Column(String, default="GEE")  # 'GEE'
     image_id = Column(String, nullable=True)
     cloud_percentage = Column(Float, nullable=True)
+    acquisition_date = Column(Date, nullable=True)
+    field_cloud_percentage = Column(Float, nullable=True)
+    valid_pixel_percentage = Column(Float, nullable=True)
+    vegetation_pixel_percentage = Column(Float, nullable=True)
+    analysis_status = Column(String, default="SUCCESS")
     created_at = Column(DateTime, default=datetime.utcnow)
 
     # Relationships

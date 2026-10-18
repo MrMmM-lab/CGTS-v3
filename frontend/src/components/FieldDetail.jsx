@@ -17,9 +17,19 @@ import {
   Sparkles,
   ChevronRight
 } from 'lucide-react';
-import { MapContainer, TileLayer, Polygon, Marker, Popup } from 'react-leaflet';
+import { MapContainer, TileLayer, Polygon, Marker, Popup, LayersControl, useMap } from 'react-leaflet';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, AreaChart, Area } from 'recharts';
 import { calculateCentroid, calculatePolygonArea, getNdviColorInfo, formatThaiDate, formatDateDMY } from '../utils/geoUtils';
+
+const MapRecenter = ({ center }) => {
+  const map = useMap();
+  useEffect(() => {
+    if (center && center[0] && center[1]) {
+      map.flyTo(center, 16, { duration: 1.0 });
+    }
+  }, [center[0], center[1], map]);
+  return null;
+};
 
 const FieldDetail = () => {
   const { user, token, selectedFieldId, navigateTo, API_URL } = useAuth();
@@ -47,8 +57,8 @@ const FieldDetail = () => {
         setError('ไม่พบข้อมูลแปลงเพาะปลูกนี้');
       }
 
-      // 2. Fetch historical NDVI
-      const historyRes = await fetch(`${API_URL}/fields/${selectedFieldId}/ndvi-history`, {
+      // 2. Fetch historical NDVI + 3-month forecast
+      const historyRes = await fetch(`${API_URL}/fields/${selectedFieldId}/ndvi-history?include_forecast=true`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (historyRes.ok) {
@@ -128,8 +138,8 @@ const FieldDetail = () => {
   }
   const centroid = [field.centroid_lat || 16.4451, field.centroid_lng || 103.5327];
   const isSugarcane = field.crop_type.toLowerCase() === 'sugarcane';
-  const latestNdvi = field.latest_ndvi?.ndvi_mean || (ndviHistory.length > 0 ? ndviHistory[ndviHistory.length - 1].ndvi_mean : 0.60);
-  const ndviInfo = getNdviColorInfo(latestNdvi);
+  const latestNdvi = field.latest_ndvi?.ndvi_mean ?? (ndviHistory.length > 0 ? ndviHistory[ndviHistory.length - 1].ndvi_mean : null);
+  const ndviInfo = latestNdvi !== null ? getNdviColorInfo(latestNdvi) : null;
 
   return (
     <div className="space-y-6 pb-12">
@@ -204,13 +214,13 @@ const FieldDetail = () => {
         <div>
           <span className="text-[10px] font-bold text-slate-500 dark:text-gray-400 uppercase block">ดัชนี NDVI ล่าสุด</span>
           <div className="flex items-center gap-2 mt-1">
-            <div className={`w-3 h-3 rounded-full ${ndviInfo.bg}`} />
+            {ndviInfo && <div className={`w-3 h-3 rounded-full ${ndviInfo.bg}`} />}
             <span className="text-xl font-black text-slate-850 dark:text-white">
-              {latestNdvi.toFixed(4)}
+              {latestNdvi !== null ? latestNdvi.toFixed(4) : '-'}
             </span>
           </div>
           <span className="text-xs text-emerald-600 dark:text-emerald-400 font-semibold truncate block">
-            {field.latest_ndvi?.source === 'GEE' ? '🛰️ ข้อมูลดาวเทียม GEE' : '🧪 ข้อมูลจำลอง (Mock)'}
+            {latestNdvi !== null ? '🛰️ ข้อมูลดาวเทียม GEE' : 'ยังไม่มีข้อมูลดาวเทียม'}
           </span>
         </div>
 
@@ -298,7 +308,7 @@ const FieldDetail = () => {
             <div className="glass-card p-6 rounded-2xl border-l-4 border-emerald-500">
               <span className="text-xs font-bold text-slate-500 dark:text-gray-400 uppercase">ค่าเฉลี่ยความเขียว (NDVI Mean)</span>
               <span className="block text-2xl font-black text-slate-850 dark:text-white mt-1">
-                {latestNdvi.toFixed(4)}
+                {latestNdvi !== null ? latestNdvi.toFixed(4) : '-'}
               </span>
               <p className="text-xs text-slate-500 dark:text-gray-400 mt-2">
                 สูตร (B8 - B4) / (B8 + B4) อยู่ในช่วง -1 ถึง 1
@@ -308,7 +318,7 @@ const FieldDetail = () => {
             <div className="glass-card p-6 rounded-2xl border-l-4 border-teal-500">
               <span className="text-xs font-bold text-slate-500 dark:text-gray-400 uppercase">สถานะการเจริญเติบโต</span>
               <span className="block text-xl font-black text-emerald-600 dark:text-emerald-400 mt-1">
-                {ndviInfo.label}
+                {ndviInfo ? ndviInfo.label : 'ยังไม่มีข้อมูล'}
               </span>
               <p className="text-xs text-slate-500 dark:text-gray-400 mt-2">
                 วิเคราะห์ตามเกณฑ์พืชเกษตรแม่นยำ (Precision Agriculture)
@@ -350,10 +360,11 @@ const FieldDetail = () => {
                   zoom={15}
                   style={{ width: '100%', height: '100%' }}
                 >
+                  <MapRecenter center={centroid} />
                   <TileLayer
-                    attribution="&copy; Google Satellite"
-                    url="https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}"
-                    maxZoom={20}
+                    attribution="&copy; Esri World Imagery"
+                    url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+                    maxZoom={19}
                   />
                   {coords.length >= 3 && (
                     <Polygon
@@ -448,17 +459,36 @@ const FieldDetail = () => {
               zoom={16}
               style={{ width: '100%', height: '100%' }}
             >
-              <TileLayer
-                attribution="&copy; Google Satellite Hybrid"
-                url="https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}"
-                maxZoom={20}
-              />
+              <MapRecenter center={centroid} />
+              <LayersControl position="topright">
+                <LayersControl.BaseLayer checked name="🌍 Esri World Imagery (ดาวเทียมจริง)">
+                  <TileLayer
+                    attribution="&copy; Esri World Imagery &mdash; Source: Esri, Maxar, Earthstar Geographics"
+                    url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+                    maxZoom={19}
+                  />
+                </LayersControl.BaseLayer>
+                <LayersControl.BaseLayer name="🛰️ Sentinel-2 Cloudless (Copernicus/EOX)">
+                  <TileLayer
+                    attribution="&copy; Sentinel-2 cloudless by EOX"
+                    url="https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2021_3857/default/GoogleMapsCompatible/{z}/{y}/{x}.jpg"
+                    maxZoom={18}
+                  />
+                </LayersControl.BaseLayer>
+                <LayersControl.BaseLayer name="🗺️ Google Satellite (มีชื่อถนน)">
+                  <TileLayer
+                    attribution="&copy; Google Satellite Imagery"
+                    url="https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}"
+                    maxZoom={20}
+                  />
+                </LayersControl.BaseLayer>
+              </LayersControl>
               {coords.length >= 3 && (
                 <Polygon
                   positions={coords}
                   pathOptions={{
                     color: '#10b981',
-                    fillColor: ndviInfo.color,
+                    fillColor: ndviInfo?.color || '#10b981',
                     fillOpacity: 0.55,
                     weight: 3.5,
                   }}
@@ -467,8 +497,8 @@ const FieldDetail = () => {
                     <div className="text-slate-900 text-xs font-semibold p-1 space-y-1">
                       <strong className="text-sm">{field.name}</strong>
                       <p>ชนิดพืช: {isSugarcane ? 'อ้อย' : 'มันสำปะหลัง'}</p>
-                      <p>NDVI Mean: {latestNdvi.toFixed(4)}</p>
-                      <p>สถานะ: {ndviInfo.label}</p>
+                      <p>NDVI Mean: {latestNdvi !== null ? latestNdvi.toFixed(4) : '-'}</p>
+                      <p>สถานะ: {ndviInfo ? ndviInfo.label : 'ยังไม่มีข้อมูลดาวเทียม'}</p>
                     </div>
                   </Popup>
                 </Polygon>

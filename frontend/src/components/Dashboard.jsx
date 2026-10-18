@@ -82,12 +82,14 @@ const Dashboard = () => {
   const cassavaFields = fields.filter(f => f.crop_type === 'cassava').length;
   const totalAreaRai = fields.reduce((acc, f) => acc + (f.area_rai || 0), 0);
   
-  // Average latest NDVI
-  const fieldsWithNdvi = fields.filter(f => f.latest_ndvi?.ndvi_mean !== undefined);
+  // Average latest NDVI (Strictly count SUCCESS records with non-null ndvi_mean)
+  const fieldsWithNdvi = fields.filter(
+    f => f.latest_ndvi && f.latest_ndvi.analysis_status === 'SUCCESS' && f.latest_ndvi.ndvi_mean !== undefined && f.latest_ndvi.ndvi_mean !== null
+  );
   const avgNdvi = fieldsWithNdvi.length > 0 
     ? (fieldsWithNdvi.reduce((acc, f) => acc + f.latest_ndvi.ndvi_mean, 0) / fieldsWithNdvi.length)
-    : 0.62;
-  const avgNdviInfo = getNdviColorInfo(avgNdvi);
+    : null;
+  const avgNdviInfo = avgNdvi !== null ? getNdviColorInfo(avgNdvi) : null;
 
   // Default center point for map
   const mapCenter = fields.length > 0
@@ -189,13 +191,13 @@ const Dashboard = () => {
             <Map className="w-5 h-5 text-blue-500" />
           </div>
           <div className="flex items-center gap-2 mt-2">
-            <div className={`w-3 h-3 rounded-full ${avgNdviInfo.bg}`} />
+            {avgNdviInfo && <div className={`w-3 h-3 rounded-full ${avgNdviInfo.bg}`} />}
             <span className="text-3xl font-black text-slate-850 dark:text-white">
-              {avgNdvi.toFixed(2)}
+              {avgNdvi !== null ? avgNdvi.toFixed(2) : '-'}
             </span>
           </div>
           <p className="text-xs text-emerald-600 dark:text-emerald-400 font-semibold mt-2 truncate">
-            {avgNdviInfo.label.split('(')[0]}
+            {avgNdviInfo ? avgNdviInfo.label.split('(')[0] : 'ยังไม่มีข้อมูลแปลง'}
           </p>
         </div>
 
@@ -248,9 +250,9 @@ const Dashboard = () => {
               style={{ width: '100%', height: '100%' }}
             >
               <TileLayer
-                attribution="&copy; Google Satellite Hybrid"
-                url="https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}"
-                maxZoom={20}
+                attribution="&copy; Esri World Imagery"
+                url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+                maxZoom={19}
               />
 
               {fields.map(f => {
@@ -274,7 +276,7 @@ const Dashboard = () => {
                         <strong className="text-sm block">{f.name}</strong>
                         <p>ชนิดพืช: {isS ? 'อ้อย (Sugarcane)' : 'มันสำปะหลัง (Cassava)'}</p>
                         <p>ขนาด: {f.area_rai} ไร่</p>
-                        <p>NDVI: {(f.latest_ndvi?.ndvi_mean || 0.60).toFixed(4)}</p>
+                        <p>NDVI: {f.latest_ndvi?.ndvi_mean !== undefined && f.latest_ndvi?.ndvi_mean !== null ? f.latest_ndvi.ndvi_mean.toFixed(4) : '-'}</p>
                         <button
                           onClick={() => navigateTo('field-detail', f.id)}
                           className="mt-2 w-full py-1 rounded bg-emerald-600 text-white font-bold text-[10px] cursor-pointer"
@@ -290,74 +292,10 @@ const Dashboard = () => {
           </div>
         </div>
 
-        {/* Right: Quick Action Hub & Field List */}
+        {/* Right: Field List */}
         <div className="space-y-6">
-          
-          {/* Quick Nav Cards */}
-          <div className="glass-panel p-6 rounded-3xl space-y-3">
-            <h3 className="text-sm font-bold text-slate-850 dark:text-white uppercase tracking-wider">
-              เมนูลัดงานวิจัย (Quick Access)
-            </h3>
-            
-            <div className="space-y-2">
-              <button
-                onClick={() => navigateTo('my-fields')}
-                className="w-full p-3.5 rounded-2xl bg-slate-100/60 dark:bg-slate-900/60 border border-slate-200/50 dark:border-slate-800/50 hover:border-emerald-500/40 transition-all flex items-center justify-between text-left group cursor-pointer"
-              >
-                <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-xl bg-emerald-500/10 text-emerald-500 flex items-center justify-center">
-                    <MapPin className="w-4 h-4" />
-                  </div>
-                  <div>
-                    <span className="text-xs font-bold text-slate-850 dark:text-white block group-hover:text-emerald-500 transition-colors">
-                      จัดการแปลงปลูก (My Fields)
-                    </span>
-                    <span className="text-[10px] text-slate-500">เพิ่ม/แก้ไข/วาดขอบเขต Polygon</span>
-                  </div>
-                </div>
-                <ArrowRight className="w-4 h-4 text-slate-400 group-hover:translate-x-1 transition-transform" />
-              </button>
-
-              <button
-                onClick={() => navigateTo('trend-graph')}
-                className="w-full p-3.5 rounded-2xl bg-slate-100/60 dark:bg-slate-900/60 border border-slate-200/50 dark:border-slate-800/50 hover:border-teal-500/40 transition-all flex items-center justify-between text-left group cursor-pointer"
-              >
-                <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-xl bg-teal-500/10 text-teal-500 flex items-center justify-center">
-                    <TrendingUp className="w-4 h-4" />
-                  </div>
-                  <div>
-                    <span className="text-xs font-bold text-slate-850 dark:text-white block group-hover:text-teal-500 transition-colors">
-                      กราฟแนวโน้ม (Trend Graph)
-                    </span>
-                    <span className="text-[10px] text-slate-500">วิเคราะห์ Time-series ความเขียว</span>
-                  </div>
-                </div>
-                <ArrowRight className="w-4 h-4 text-slate-400 group-hover:translate-x-1 transition-transform" />
-              </button>
-
-              <button
-                onClick={() => navigateTo('compare')}
-                className="w-full p-3.5 rounded-2xl bg-slate-100/60 dark:bg-slate-900/60 border border-slate-200/50 dark:border-slate-800/50 hover:border-blue-500/40 transition-all flex items-center justify-between text-left group cursor-pointer"
-              >
-                <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-xl bg-blue-500/10 text-blue-500 flex items-center justify-center">
-                    <GitCompare className="w-4 h-4" />
-                  </div>
-                  <div>
-                    <span className="text-xs font-bold text-slate-850 dark:text-white block group-hover:text-blue-500 transition-colors">
-                      เปรียบเทียบช่วงเวลา (Compare)
-                    </span>
-                    <span className="text-[10px] text-slate-500">หาผลต่าง Difference = B - A</span>
-                  </div>
-                </div>
-                <ArrowRight className="w-4 h-4 text-slate-400 group-hover:translate-x-1 transition-transform" />
-              </button>
-            </div>
-          </div>
-
           {/* Recent Fields Mini List */}
-          <div className="glass-panel p-6 rounded-3xl space-y-3">
+          <div className="glass-panel p-6 rounded-3xl space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-bold text-slate-850 dark:text-white uppercase tracking-wider">
                 แปลงเพาะปลูกล่าสุด
@@ -366,29 +304,34 @@ const Dashboard = () => {
                 onClick={() => navigateTo('my-fields')}
                 className="text-xs text-emerald-600 dark:text-emerald-400 font-bold hover:underline cursor-pointer"
               >
-                ดูทั้งหมด ({fields.length})
+                ดูทั้งหมด ({fields.length}) →
               </button>
             </div>
 
             {fields.length === 0 ? (
-              <p className="text-xs text-slate-500 dark:text-gray-400 py-3 text-center">ยังไม่มีแปลงเพาะปลูก</p>
+              <p className="text-xs text-slate-500 dark:text-gray-400 py-6 text-center">ยังไม่มีแปลงเพาะปลูกในระบบ</p>
             ) : (
-              <div className="space-y-2 max-h-52 overflow-y-auto pr-1">
-                {fields.slice(0, 3).map(f => (
+              <div className="space-y-2.5 max-h-[360px] overflow-y-auto pr-1">
+                {fields.map(f => (
                   <div
                     key={f.id}
                     onClick={() => navigateTo('field-detail', f.id)}
-                    className="p-3 rounded-xl bg-slate-100/50 dark:bg-slate-900/50 border border-slate-200/40 dark:border-slate-800/40 hover:border-emerald-500/30 transition-all flex items-center justify-between cursor-pointer"
+                    className="p-3.5 rounded-2xl bg-slate-100/60 dark:bg-slate-900/60 border border-slate-200/50 dark:border-slate-800/50 hover:border-emerald-500/40 transition-all flex items-center justify-between cursor-pointer group"
                   >
                     <div>
-                      <span className="text-xs font-bold text-slate-800 dark:text-white block">
+                      <span className="text-xs font-bold text-slate-850 dark:text-white block group-hover:text-emerald-500 transition-colors">
                         {f.crop_type === 'sugarcane' ? '🌾' : '🥔'} {f.name}
                       </span>
                       <span className="text-[10px] text-slate-500">{f.area_rai} ไร่ • วันปลูก {formatThaiDate(f.planting_date)}</span>
                     </div>
-                    <span className="text-xs font-mono font-bold text-emerald-600 dark:text-emerald-400">
-                      {(f.latest_ndvi?.ndvi_mean || 0.60).toFixed(2)}
-                    </span>
+                    <div className="text-right">
+                      <span className="text-xs font-mono font-bold text-emerald-600 dark:text-emerald-400 block">
+                        {f.latest_ndvi?.ndvi_mean !== undefined && f.latest_ndvi?.ndvi_mean !== null
+                          ? f.latest_ndvi.ndvi_mean.toFixed(2)
+                          : '-'}
+                      </span>
+                      <span className="text-[9px] text-slate-400">NDVI ล่าสุด</span>
+                    </div>
                   </div>
                 ))}
               </div>

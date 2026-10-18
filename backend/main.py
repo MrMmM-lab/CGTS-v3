@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import date, datetime
 import json
-import database, models, schemas, auth, gee_service
+import database, models, schemas, auth, gee_service, forecast_service
 
 app = FastAPI(title="CGTS API")
 
@@ -171,24 +171,34 @@ def create_field(
     db.commit()
     db.refresh(new_field)
 
-    # Seed initial historical NDVI records for research trend visualization
-    initial_records = gee_service.seed_initial_historical_ndvi(
-        field_id=new_field.id,
-        crop_type=new_field.crop_type,
-        planting_date=new_field.planting_date
-    )
-    for rec in initial_records:
-        db_rec = models.NDVIRecord(
-            field_id=rec["field_id"],
-            observation_date=rec["observation_date"],
-            ndvi_mean=rec["ndvi_mean"],
-            ndvi_min=rec["ndvi_min"],
-            ndvi_max=rec["ndvi_max"],
-            source=rec["source"],
-            cloud_percentage=rec["cloud_percentage"]
+    # Calculate real initial NDVI from Sentinel-2 via Google Earth Engine
+    try:
+        real_res = gee_service.get_field_ndvi(
+            coordinates_json=new_field.coordinates,
+            crop_type=new_field.crop_type,
+            planting_date=new_field.planting_date,
+            target_date=date.today()
         )
-        db.add(db_rec)
-    db.commit()
+        if real_res.get("analysis_status") == "SUCCESS":
+            db_rec = models.NDVIRecord(
+                field_id=new_field.id,
+                observation_date=real_res["observation_date"],
+                acquisition_date=real_res.get("acquisition_date"),
+                ndvi_mean=real_res["ndvi_mean"],
+                ndvi_min=real_res["ndvi_min"],
+                ndvi_max=real_res["ndvi_max"],
+                source="GEE",
+                image_id=real_res.get("image_id"),
+                cloud_percentage=real_res.get("cloud_percentage"),
+                field_cloud_percentage=real_res.get("field_cloud_percentage"),
+                valid_pixel_percentage=real_res.get("valid_pixel_percentage"),
+                vegetation_pixel_percentage=real_res.get("vegetation_pixel_percentage"),
+                analysis_status="SUCCESS"
+            )
+            db.add(db_rec)
+            db.commit()
+    except Exception as gee_err:
+        print(f"[Create Field] Sentinel-2 query notice: {gee_err}")
 
     latest_ndvi = (
         db.query(models.NDVIRecord)
@@ -311,10 +321,11 @@ def delete_field(
 # NDVI & HISTORICAL DATA ENDPOINTS
 # ==========================================
 
-@app.get("/api/fields/{field_id}/ndvi-history", response_model=List[schemas.NDVIRecordResponse])
+@app.get("/api/fields/{field_id}/ndvi-history")
 def get_field_ndvi_history(
     field_id: int,
     days: Optional[int] = Query(None, description="Filter last N days (e.g. 7, 30, 90)"),
+    include_forecast: Optional[bool] = Query(False, description="Include 90-day forecast in historical output"),
     current_user: models.User = Depends(auth.get_current_user),
     db: Session = Depends(database.get_db)
 ):
@@ -330,7 +341,97 @@ def get_field_ndvi_history(
         cutoff_date = date.today() - timedelta(days=days)
         records_query = records_query.filter(models.NDVIRecord.observation_date >= cutoff_date)
 
-    return records_query.order_by(models.NDVIRecord.observation_date.asc()).all()
+    db_records = records_query.order_by(models.NDVIRecord.observation_date.asc()).all()
+    
+    # Convert DB objects to serializable dicts
+    result = []
+    for r in db_records:
+        rec_dict = {
+            "id": r.id,
+            "field_id": r.field_id,
+            "observation_date": r.observation_date.strftime("%Y-%m-%d"),
+            "acquisition_date": r.acquisition_date.strftime("%Y-%m-%d") if r.acquisition_date else None,
+            "ndvi_mean": r.ndvi_mean,
+            "ndvi_min": r.ndvi_min,
+            "ndvi_max": r.ndvi_max,
+            "source": r.source,
+            "image_id": r.image_id,
+            "cloud_percentage": r.cloud_percentage,
+            "field_cloud_percentage": r.field_cloud_percentage,
+            "valid_pixel_percentage": r.valid_pixel_percentage,
+            "vegetation_pixel_percentage": r.vegetation_pixel_percentage,
+            "analysis_status": r.analysis_status,
+            "is_forecast": False,
+            "created_at": r.created_at.isoformat() if r.created_at else None
+        }
+        result.append(rec_dict)
+
+    if include_forecast:
+        latest_actual = db_records[-1] if db_records else None
+        latest_actual_date = latest_actual.observation_date if latest_actual else date.today()
+        latest_actual_ndvi = latest_actual.ndvi_mean if (latest_actual and latest_actual.analysis_status == "SUCCESS") else None
+
+        forecast_points = forecast_service.generate_crop_forecast(
+            crop_type=field.crop_type,
+            planting_date=field.planting_date,
+            latest_actual_date=latest_actual_date,
+            latest_actual_ndvi=latest_actual_ndvi,
+            forecast_days=90,
+            interval_days=5
+        )
+        result.extend(forecast_points)
+
+    return result
+
+@app.get("/api/fields/{field_id}/forecast")
+def get_field_crop_forecast(
+    field_id: int,
+    days: Optional[int] = Query(90, description="Forecast horizon in days (e.g. 90)"),
+    current_user: models.User = Depends(auth.get_current_user),
+    db: Session = Depends(database.get_db)
+):
+    query = db.query(models.Field).filter(models.Field.id == field_id)
+    if current_user.role != "admin":
+        query = query.filter(models.Field.user_id == current_user.id)
+    field = query.first()
+    if not field:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Field not found")
+
+    latest_actual = (
+        db.query(models.NDVIRecord)
+        .filter(models.NDVIRecord.field_id == field_id, models.NDVIRecord.analysis_status == "SUCCESS")
+        .order_by(models.NDVIRecord.observation_date.desc())
+        .first()
+    )
+
+    latest_actual_date = latest_actual.observation_date if latest_actual else date.today()
+    latest_actual_ndvi = latest_actual.ndvi_mean if latest_actual else None
+
+    forecast_items = forecast_service.generate_crop_forecast(
+        crop_type=field.crop_type,
+        planting_date=field.planting_date,
+        latest_actual_date=latest_actual_date,
+        latest_actual_ndvi=latest_actual_ndvi,
+        forecast_days=days or 90,
+        interval_days=5
+    )
+
+    current_age = (date.today() - field.planting_date).days
+    current_stage = forecast_service.get_crop_stage_and_advice(field.crop_type, current_age)
+
+    return {
+        "field_id": field.id,
+        "field_name": field.name,
+        "crop_type": field.crop_type,
+        "planting_date": field.planting_date.strftime("%Y-%m-%d"),
+        "current_crop_age_days": current_age,
+        "current_stage": current_stage["stage"],
+        "current_advice": current_stage["advice"],
+        "latest_observed_ndvi": latest_actual_ndvi,
+        "latest_observation_date": latest_actual_date.strftime("%Y-%m-%d") if latest_actual_date else None,
+        "forecast_horizon_days": days or 90,
+        "forecast_items": forecast_items
+    }
 
 @app.post("/api/ndvi/calculate", response_model=schemas.NDVICalculateResponse)
 def calculate_ndvi_for_field(
@@ -353,35 +454,53 @@ def calculate_ndvi_for_field(
         target_date=target_date
     )
 
-    # Save to historical records if not already present for this date
-    existing_rec = (
-        db.query(models.NDVIRecord)
-        .filter(models.NDVIRecord.field_id == field.id, models.NDVIRecord.observation_date == target_date)
-        .first()
-    )
-    if not existing_rec:
-        new_rec = models.NDVIRecord(
-            field_id=field.id,
-            observation_date=target_date,
-            ndvi_mean=res["ndvi_mean"],
-            ndvi_min=res["ndvi_min"],
-            ndvi_max=res["ndvi_max"],
-            source=res["source"],
-            cloud_percentage=res.get("cloud_percentage", 5.0)
+    # Save to historical records only if analysis succeeded
+    if res.get("analysis_status") == "SUCCESS":
+        existing_rec = (
+            db.query(models.NDVIRecord)
+            .filter(models.NDVIRecord.field_id == field.id, models.NDVIRecord.observation_date == target_date)
+            .first()
         )
-        db.add(new_rec)
-        db.commit()
+        if not existing_rec:
+            new_rec = models.NDVIRecord(
+                field_id=field.id,
+                observation_date=target_date,
+                acquisition_date=res.get("acquisition_date"),
+                ndvi_mean=res["ndvi_mean"],
+                ndvi_min=res["ndvi_min"],
+                ndvi_max=res["ndvi_max"],
+                source=res["source"],
+                image_id=res.get("image_id"),
+                cloud_percentage=res.get("cloud_percentage"),
+                field_cloud_percentage=res.get("field_cloud_percentage"),
+                valid_pixel_percentage=res.get("valid_pixel_percentage"),
+                vegetation_pixel_percentage=res.get("vegetation_pixel_percentage"),
+                analysis_status="SUCCESS"
+            )
+            db.add(new_rec)
+            db.commit()
 
     return schemas.NDVICalculateResponse(
         field_id=field.id,
+        target_date=target_date,
         observation_date=target_date,
-        ndvi_mean=res["ndvi_mean"],
-        ndvi_min=res["ndvi_min"],
-        ndvi_max=res["ndvi_max"],
-        source=res["source"],
-        cloud_percentage=res.get("cloud_percentage", 5.0),
+        acquisition_date=res.get("acquisition_date"),
+        image_id=res.get("image_id"),
+        cloud_percentage=res.get("cloud_percentage"),
+        field_cloud_percentage=res.get("field_cloud_percentage"),
+        valid_pixel_percentage=res.get("valid_pixel_percentage"),
+        vegetation_pixel_percentage=res.get("vegetation_pixel_percentage"),
+        analysis_status=res.get("analysis_status", "ERROR"),
+        ndvi_mean=res.get("ndvi_mean"),
+        ndvi_min=res.get("ndvi_min"),
+        ndvi_max=res.get("ndvi_max"),
+        source=res.get("source", "GEE"),
         tile_url=res.get("tile_url"),
-        is_mock=res.get("is_mock", True),
+        standard_tile_url=res.get("standard_tile_url"),
+        rgb_tile_url=res.get("rgb_tile_url"),
+        adaptive_min=res.get("adaptive_min"),
+        adaptive_max=res.get("adaptive_max"),
+        is_mock=False,
         message=res.get("message", "NDVI calculation completed")
     )
 
@@ -401,6 +520,10 @@ def compare_field_ndvi(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Field not found")
 
     # Get or compute NDVI for Date A
+    tile_url_a = None
+    standard_tile_url_a = None
+    rgb_tile_url_a = None
+
     rec_a = (
         db.query(models.NDVIRecord)
         .filter(models.NDVIRecord.field_id == field.id, models.NDVIRecord.observation_date == date_a)
@@ -408,20 +531,47 @@ def compare_field_ndvi(
     )
     if not rec_a:
         calc_a = gee_service.get_field_ndvi(field.coordinates, field.crop_type, field.planting_date, date_a)
+        if calc_a.get("analysis_status") != "SUCCESS":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"วันที่ {date_a.strftime('%d/%m/%Y')} ไม่สามารถเปรียบเทียบได้: {calc_a.get('message')}"
+            )
+        tile_url_a = calc_a.get("tile_url")
+        standard_tile_url_a = calc_a.get("standard_tile_url")
+        rgb_tile_url_a = calc_a.get("rgb_tile_url")
         rec_a = models.NDVIRecord(
             field_id=field.id,
             observation_date=date_a,
+            acquisition_date=calc_a.get("acquisition_date"),
             ndvi_mean=calc_a["ndvi_mean"],
             ndvi_min=calc_a["ndvi_min"],
             ndvi_max=calc_a["ndvi_max"],
             source=calc_a["source"],
-            cloud_percentage=calc_a.get("cloud_percentage", 5.0)
+            image_id=calc_a.get("image_id"),
+            cloud_percentage=calc_a.get("cloud_percentage"),
+            field_cloud_percentage=calc_a.get("field_cloud_percentage"),
+            valid_pixel_percentage=calc_a.get("valid_pixel_percentage"),
+            vegetation_pixel_percentage=calc_a.get("vegetation_pixel_percentage"),
+            analysis_status="SUCCESS"
         )
         db.add(rec_a)
         db.commit()
         db.refresh(rec_a)
+    elif gee_service.is_gee_available():
+        try:
+            calc_a = gee_service.get_field_ndvi(field.coordinates, field.crop_type, field.planting_date, date_a)
+            if calc_a.get("analysis_status") == "SUCCESS":
+                tile_url_a = calc_a.get("tile_url")
+                standard_tile_url_a = calc_a.get("standard_tile_url")
+                rgb_tile_url_a = calc_a.get("rgb_tile_url")
+        except Exception:
+            pass
 
     # Get or compute NDVI for Date B
+    tile_url_b = None
+    standard_tile_url_b = None
+    rgb_tile_url_b = None
+
     rec_b = (
         db.query(models.NDVIRecord)
         .filter(models.NDVIRecord.field_id == field.id, models.NDVIRecord.observation_date == date_b)
@@ -429,18 +579,41 @@ def compare_field_ndvi(
     )
     if not rec_b:
         calc_b = gee_service.get_field_ndvi(field.coordinates, field.crop_type, field.planting_date, date_b)
+        if calc_b.get("analysis_status") != "SUCCESS":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"วันที่ {date_b.strftime('%d/%m/%Y')} ไม่สามารถเปรียบเทียบได้: {calc_b.get('message')}"
+            )
+        tile_url_b = calc_b.get("tile_url")
+        standard_tile_url_b = calc_b.get("standard_tile_url")
+        rgb_tile_url_b = calc_b.get("rgb_tile_url")
         rec_b = models.NDVIRecord(
             field_id=field.id,
             observation_date=date_b,
+            acquisition_date=calc_b.get("acquisition_date"),
             ndvi_mean=calc_b["ndvi_mean"],
             ndvi_min=calc_b["ndvi_min"],
             ndvi_max=calc_b["ndvi_max"],
             source=calc_b["source"],
-            cloud_percentage=calc_b.get("cloud_percentage", 5.0)
+            image_id=calc_b.get("image_id"),
+            cloud_percentage=calc_b.get("cloud_percentage"),
+            field_cloud_percentage=calc_b.get("field_cloud_percentage"),
+            valid_pixel_percentage=calc_b.get("valid_pixel_percentage"),
+            vegetation_pixel_percentage=calc_b.get("vegetation_pixel_percentage"),
+            analysis_status="SUCCESS"
         )
         db.add(rec_b)
         db.commit()
         db.refresh(rec_b)
+    elif gee_service.is_gee_available():
+        try:
+            calc_b = gee_service.get_field_ndvi(field.coordinates, field.crop_type, field.planting_date, date_b)
+            if calc_b.get("analysis_status") == "SUCCESS":
+                tile_url_b = calc_b.get("tile_url")
+                standard_tile_url_b = calc_b.get("standard_tile_url")
+                rgb_tile_url_b = calc_b.get("rgb_tile_url")
+        except Exception:
+            pass
 
     # Formula: Difference = NDVI_B - NDVI_A
     diff = round(rec_b.ndvi_mean - rec_a.ndvi_mean, 4)
@@ -461,5 +634,11 @@ def compare_field_ndvi(
         ndvi_b=schemas.NDVIRecordResponse.from_orm(rec_b),
         difference=diff,
         change_status=status_text,
-        source=f"{rec_a.source}/{rec_b.source}"
+        source=f"{rec_a.source}/{rec_b.source}",
+        tile_url_a=tile_url_a,
+        standard_tile_url_a=standard_tile_url_a,
+        rgb_tile_url_a=rgb_tile_url_a,
+        tile_url_b=tile_url_b,
+        standard_tile_url_b=standard_tile_url_b,
+        rgb_tile_url_b=rgb_tile_url_b
     )

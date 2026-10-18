@@ -4,11 +4,11 @@
     "type": "split",
     "children": [
       {
-        "id": "cc115dffdc89d2bc",
+        "id": "ee26bfb8a57e5a59",
         "type": "tabs",
         "children": [
           {
-            "id": "437b07126209125d",
+            "id": "9987449e530f52b8",
             "type": "leaf",
             "state": {
               "type": "empty",
@@ -181,8 +181,10 @@
       "bases:Create new base": false
     }
   },
-  "active": "437b07126209125d",
+  "active": "cf7c8579f8f5beb5",
   "lastOpenFiles": [
+    "frontend/node_modules/redux-thunk/README.md",
+    "frontend/node_modules/redux-thunk/LICENSE.md",
     "frontend.zip~RF27c93d.TMP",
     "frontend.zip",
     "backend.zip~RF264712.TMP",

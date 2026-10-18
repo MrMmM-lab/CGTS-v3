@@ -105,3 +105,10 @@ body {
 .animate-pulse-slow {
   animation: pulse-slow 8s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
+
+/* Crisp Pixelated Image Rendering for Leaflet Satellite & GEE Tiles */
+.leaflet-tile-container img, .leaflet-pixelated-tile img {
+  image-rendering: pixelated !important;
+  image-rendering: crisp-edges !important;
+  image-rendering: -moz-crisp-edges !important;
+}

@@ -34,12 +34,21 @@ class TokenData(BaseModel):
 
 class NDVIRecordBase(BaseModel):
     observation_date: date
-    ndvi_mean: float
-    ndvi_min: float
-    ndvi_max: float
-    source: str = "MOCK"  # 'GEE' or 'MOCK'
+    acquisition_date: Optional[date] = None
+    ndvi_mean: Optional[float] = None
+    ndvi_min: Optional[float] = None
+    ndvi_max: Optional[float] = None
+    source: str = "GEE"  # 'GEE' or 'FORECAST'
     image_id: Optional[str] = None
     cloud_percentage: Optional[float] = None
+    field_cloud_percentage: Optional[float] = None
+    valid_pixel_percentage: Optional[float] = None
+    vegetation_pixel_percentage: Optional[float] = None
+    analysis_status: Optional[str] = "SUCCESS"
+    is_forecast: Optional[bool] = False
+    crop_age_days: Optional[int] = None
+    stage_name: Optional[str] = None
+    recommendation: Optional[str] = None
 
 class NDVIRecordCreate(NDVIRecordBase):
     field_id: int
@@ -95,14 +104,25 @@ class NDVICalculateRequest(BaseModel):
 
 class NDVICalculateResponse(BaseModel):
     field_id: int
+    target_date: date
     observation_date: date
-    ndvi_mean: float
-    ndvi_min: float
-    ndvi_max: float
-    source: str  # 'GEE' or 'MOCK'
-    cloud_percentage: float
+    acquisition_date: Optional[date] = None
+    image_id: Optional[str] = None
+    cloud_percentage: Optional[float] = None
+    field_cloud_percentage: Optional[float] = None
+    valid_pixel_percentage: Optional[float] = None
+    vegetation_pixel_percentage: Optional[float] = None
+    analysis_status: str  # 'SUCCESS', 'CLOUDY', 'NO_IMAGE', 'ERROR'
+    ndvi_mean: Optional[float] = None
+    ndvi_min: Optional[float] = None
+    ndvi_max: Optional[float] = None
+    source: str = "GEE"  # 'GEE'
     tile_url: Optional[str] = None
-    is_mock: bool = True
+    standard_tile_url: Optional[str] = None
+    rgb_tile_url: Optional[str] = None
+    adaptive_min: Optional[float] = None
+    adaptive_max: Optional[float] = None
+    is_mock: bool = False
     message: str
 
 class NDVICompareResponse(BaseModel):
@@ -116,6 +136,12 @@ class NDVICompareResponse(BaseModel):
     difference: float  # NDVI_B - NDVI_A
     change_status: str  # 'เพิ่มขึ้น' / 'คงที่' / 'ลดลง'
     source: str
+    tile_url_a: Optional[str] = None
+    standard_tile_url_a: Optional[str] = None
+    rgb_tile_url_a: Optional[str] = None
+    tile_url_b: Optional[str] = None
+    standard_tile_url_b: Optional[str] = None
+    rgb_tile_url_b: Optional[str] = None
 
 # --- GrowthRecord Schemas ---
 

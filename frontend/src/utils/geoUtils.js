@@ -72,36 +72,82 @@ export const calculateCentroid = (latLngs) => {
 };
 
 /**
- * Parse DMS (Degrees Minutes Seconds) string to Decimal Degrees
- * Example: 16°26'42.4"N 103°31'57.7"E -> { lat: 16.445111, lng: 103.532694 }
+ * Parse DMS (Degrees Minutes Seconds) or Decimal Degrees string to Decimal Degrees
+ * Examples:
+ * - DMS: 16°26'42.4"N 103°31'57.7"E -> { lat: 16.445111, lng: 103.532694 }
+ * - Decimal: 16.459030, 103.585911 or 16.459030 103.585911 -> { lat: 16.45903, lng: 103.585911 }
  * @param {string} dmsString 
  * @returns {{ lat: number, lng: number } | null}
  */
 export const parseDmsToDecimal = (dmsString) => {
-  if (!dmsString) return null;
+  if (!dmsString || typeof dmsString !== 'string') return null;
+  const str = dmsString.trim();
+  if (!str) return null;
+
+  // 1. Try Decimal Degrees format first: e.g. "16.459030, 103.585911" or "16.459030 N, 103.585911 E" or "[16.459030, 103.585911]"
+  const cleanStr = str.replace(/[\[\]\(\)]/g, '').trim();
+  const decimalRegex = /^([-+]?\d+\.?\d*)\s*([NSns])?[,\s]+([-+]?\d+\.?\d*)\s*([EWew])?$/;
+  const decMatch = cleanStr.match(decimalRegex);
+  if (decMatch) {
+    let lat = parseFloat(decMatch[1]);
+    const latDir = decMatch[2] ? decMatch[2].toUpperCase() : null;
+    let lng = parseFloat(decMatch[3]);
+    const lngDir = decMatch[4] ? decMatch[4].toUpperCase() : null;
+
+    if (latDir === 'S') lat = -Math.abs(lat);
+    if (latDir === 'N') lat = Math.abs(lat);
+    if (lngDir === 'W') lng = -Math.abs(lng);
+    if (lngDir === 'E') lng = Math.abs(lng);
+
+    if (!isNaN(lat) && !isNaN(lng) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180) {
+      return {
+        lat: Number(lat.toFixed(6)),
+        lng: Number(lng.toFixed(6))
+      };
+    }
+  }
+
+  // 2. Try DMS format: e.g. 16°26'42.4"N 103°31'57.7"E
   const dmsRegex = /([0-9.]+)[°\s]+([0-9.]+)?['\s]*([0-9.]+)?["\s]*([NSEWnsew])/g;
-  let matches = [...dmsString.matchAll(dmsRegex)];
-  
-  if (matches.length < 2) return null;
+  let matches = [...str.matchAll(dmsRegex)];
 
-  const parsePart = (match) => {
-    const deg = parseFloat(match[1]) || 0;
-    const min = parseFloat(match[2]) || 0;
-    const sec = parseFloat(match[3]) || 0;
-    const dir = match[4].toUpperCase();
+  if (matches.length >= 2) {
+    const parsePart = (match) => {
+      const deg = parseFloat(match[1]) || 0;
+      const min = parseFloat(match[2]) || 0;
+      const sec = parseFloat(match[3]) || 0;
+      const dir = match[4].toUpperCase();
 
-    let dec = deg + min / 60 + sec / 3600;
-    if (dir === 'S' || dir === 'W') dec = -dec;
-    return dec;
-  };
+      let dec = deg + min / 60 + sec / 3600;
+      if (dir === 'S' || dir === 'W') dec = -dec;
+      return dec;
+    };
 
-  const lat = parsePart(matches[0]);
-  const lng = parsePart(matches[1]);
+    const lat = parsePart(matches[0]);
+    const lng = parsePart(matches[1]);
 
-  return {
-    lat: Number(lat.toFixed(6)),
-    lng: Number(lng.toFixed(6))
-  };
+    if (!isNaN(lat) && !isNaN(lng) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180) {
+      return {
+        lat: Number(lat.toFixed(6)),
+        lng: Number(lng.toFixed(6))
+      };
+    }
+  }
+
+  // 3. Fallback check for two floating numbers anywhere in string: e.g., "16.459030 103.585911"
+  const numbers = str.match(/[-+]?\d+\.\d+/g);
+  if (numbers && numbers.length >= 2) {
+    const lat = parseFloat(numbers[0]);
+    const lng = parseFloat(numbers[1]);
+    if (!isNaN(lat) && !isNaN(lng) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180) {
+      return {
+        lat: Number(lat.toFixed(6)),
+        lng: Number(lng.toFixed(6))
+      };
+    }
+  }
+
+  return null;
 };
 
 /**
